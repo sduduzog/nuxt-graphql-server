@@ -6,6 +6,7 @@ import {
   useLogger,
 } from '@nuxt/kit'
 import { relative } from 'path'
+import { defu } from 'defu'
 import { CodeGenConfig, createResolverTypeDefs } from './codegen'
 import { createSchemaImport } from './schema-loader'
 import multimatch from 'multimatch'
@@ -20,27 +21,6 @@ export interface ModuleOptions {
 }
 
 const logger = useLogger('graphql/server')
-
-function setAlias(nuxt: Nuxt, alias: string, path: string) {
-  // workaround for https://github.com/nuxt/nuxt/issues/19453
-  if (process.env.NODE_ENV === 'development') {
-    // rollup needs a file URL
-    nuxt.options.alias[alias] = pathToFileURL(
-      resolvePath(nuxt.options.buildDir, path),
-    ).href
-
-    // vite needs a path
-    nuxt.hooks.hook('vite:extendConfig', (config) => {
-      config.resolve = config.resolve || {}
-      config.resolve.alias = {
-        ...config.resolve.alias,
-        [alias]: path,
-      }
-    })
-  } else {
-    nuxt.options.alias[alias] = path
-  }
-}
 
 export default defineNuxtModule<ModuleOptions>({
   meta: {
@@ -68,7 +48,6 @@ export default defineNuxtModule<ModuleOptions>({
       write: true,
     })
     logger.debug(`GraphQL schema registered at ${schemaPath}`)
-    setAlias(nuxt, '#graphql/schema', schemaPath)
 
     // Create types in build dir
     const { dst: typeDefPath } = addTemplate({
@@ -86,6 +65,20 @@ export default defineNuxtModule<ModuleOptions>({
           nuxt.options.rootDir,
         )
       },
+    })
+
+    nuxt.hook('nitro:config', nitroConfig => {
+      nitroConfig.alias = nitroConfig.alias || {}
+
+      nitroConfig.externals = defu(
+        typeof nitroConfig.externals === 'object' ? nitroConfig.externals : {},
+        {
+          inline: [schemaPath],
+        },
+      )
+
+      nitroConfig.alias['#graphql/schema'] = schemaPath
+      nitroConfig.alias['#graphql/resolver'] = resolverTypeDefPath
     })
 
     // Add types to `nuxt.d.ts`
